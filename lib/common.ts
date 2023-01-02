@@ -16,19 +16,35 @@ export enum ThreadMode {
   Parallel,
 }
 
-export interface HashOptions<T extends {} = {}> {
+export interface HashOptions {
   salt: Uint8Array;
+  secret?: Uint8Array;
+  data?: Uint8Array;
+  version?: string;
+  variant?: string;
+  memoryCost?: number;
+  timeCost?: number;
+  lanes?: number;
+  threadMode?: number;
+  hashLength?: number;
+}
+
+export interface HashParams {
+  password: string;
+  options: HashOptions;
+}
+
+export interface VerifyParams {
+  password: string;
+  hash: string;
+}
+
+export interface VerifyParamsExt {
+  verifyParams: VerifyParams;
   secret: Uint8Array;
-  data: T;
-  variant: Variant;
-  version: Version;
-  memoryCost: number;
-  timeCost: number;
-  threadMode: ThreadMode;
-  lanes: number;
-  hashLength: number;
+  data?: Uint8Array;
 }
 
 export function version() {
-  return "0.9.2";
+  return "0.10.0";
 }

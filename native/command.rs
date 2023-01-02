@@ -1,44 +1,114 @@
-use argon2::{hash_encoded, verify_encoded, Config, ThreadMode, Variant, Version};
+use argon2::{
+    hash_encoded, verify_encoded, verify_encoded_ext, Config, ThreadMode, Variant, Version,
+};
 use bytes::Bytes;
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "deno")]
 use deno_core::{plugin_api::Interface, Op, ZeroCopyBuf};
+
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
 
-#[derive(Deserialize)]
+#[cfg(feature = "wasm")]
+#[wasm_bindgen(typescript_custom_section)]
+const JS_PARAMS_STYLE: &'static str = r#"
+export interface IHashOptions {
+    salt: Uint8Array;
+    secret?: Uint8Array;
+    data?: Uint8Array;
+    version?: string;
+    variant?: string;
+    memoryCost?: number;
+    timeCost?: number;
+    lanes?: number;
+    threadMode?: number;
+    hashLength?: number;
+}
+
+export interface IHashParams {
+    password: string;
+    options: IHashOptions;
+}
+
+export interface IVerifyParams {
+    password: string;
+    hash: string;
+}
+
+export interface IVerifyParamsExt {
+    verifyParams: IVerifyParams;
+    secret: Uint8Array;
+    data?: Uint8Array;
+}
+"#;
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "IHashParams")]
+    pub type IHashParams;
+
+    #[wasm_bindgen(typescript_type = "IVerifyParams")]
+    pub type IVerifyParams;
+
+    #[wasm_bindgen(typescript_type = "IVerifyParamsExt")]
+    pub type IVerifyParamsExt;
+
+    #[wasm_bindgen(js_namespace = console)]
+    pub fn log(s: &str);
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct HashOptions {
-    salt: Bytes,
-    secret: Option<Bytes>,
-    data: Option<Bytes>,
-    version: Option<String>,
-    variant: Option<String>,
+    pub salt: Bytes,
+    pub secret: Option<Bytes>,
+    pub data: Option<Bytes>,
+    pub version: Option<String>,
+    pub variant: Option<String>,
     #[serde(rename(deserialize = "memoryCost"))]
-    memory_cost: Option<u32>,
+    pub memory_cost: Option<u32>,
     #[serde(rename(deserialize = "timeCost"))]
-    time_cost: Option<u32>,
+    pub time_cost: Option<u32>,
     #[serde(rename(deserialize = "lanes"))]
-    lanes: Option<u32>,
+    pub lanes: Option<u32>,
     #[serde(rename(deserialize = "threadMode"))]
-    thread_mode: Option<u8>,
+    pub thread_mode: Option<u8>,
     #[serde(rename(deserialize = "hashLength"))]
-    hash_length: Option<u32>,
+    pub hash_length: Option<u32>,
 }
 
-#[derive(Deserialize)]
-struct HashParams {
-    password: String,
-    options: HashOptions,
+#[derive(Deserialize, Serialize)]
+pub struct HashParams {
+    pub password: String,
+    pub options: HashOptions,
 }
 
-#[derive(Deserialize)]
-struct VerifyParams {
-    password: String,
-    hash: String,
+#[derive(Deserialize, Serialize)]
+pub struct VerifyParams {
+    pub password: String,
+    pub hash: String,
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct VerifyParamsExt {
+    #[serde(rename(deserialize = "verifyParams"))]
+    pub verify_params: VerifyParams,
+    pub secret: Bytes,
+    pub data: Option<Bytes>,
+}
+
+#[cfg(feature = "deno")]
 pub fn hash(_interface: &mut dyn Interface, buffs: &mut [ZeroCopyBuf]) -> Op {
     let data = buffs[0].clone();
     let mut buf = buffs[1].clone();
-    match hash_internal(&data) {
+
+    let params: HashParams =
+        serde_json::from_slice(&data).expect("Unable parse data to HashParams");
+
+    match hash_internal(params) {
         Ok(result) => {
             buf[0] = 1;
             Op::Sync(result.into_bytes().into_boxed_slice())
@@ -50,10 +120,15 @@ pub fn hash(_interface: &mut dyn Interface, buffs: &mut [ZeroCopyBuf]) -> Op {
     }
 }
 
+#[cfg(feature = "deno")]
 pub fn verify(_interface: &mut dyn Interface, buffs: &mut [ZeroCopyBuf]) -> Op {
     let data = buffs[0].clone();
     let mut buf = buffs[1].clone();
-    match verify_internal(&data) {
+
+    let params: VerifyParams =
+        serde_json::from_slice(&data).expect("Unable parse data to VerifyParams");
+
+    match verify_internal(params) {
         Ok(result) => {
             buf[0] = 1;
             Op::Sync(Box::new([result as u8]))
@@ -65,6 +140,7 @@ pub fn verify(_interface: &mut dyn Interface, buffs: &mut [ZeroCopyBuf]) -> Op {
     }
 }
 
+#[cfg(feature = "deno")]
 fn error_handler(err: Error, buf: &mut ZeroCopyBuf) {
     buf[0] = 0;
     let e = format!("{}", err);
@@ -74,8 +150,7 @@ fn error_handler(err: Error, buf: &mut ZeroCopyBuf) {
     }
 }
 
-fn hash_internal(data: &ZeroCopyBuf) -> Result<String, Error> {
-    let params: HashParams = serde_json::from_slice(data)?;
+pub fn hash_internal(params: HashParams) -> Result<String, Error> {
     let salt = params.options.salt;
 
     let mut config: Config = Config::default();
@@ -127,11 +202,20 @@ fn hash_internal(data: &ZeroCopyBuf) -> Result<String, Error> {
     Ok(hash_encoded(&params.password.into_bytes(), &salt, &config)?)
 }
 
-fn verify_internal(data: &ZeroCopyBuf) -> Result<bool, Error> {
-    let options: VerifyParams = serde_json::from_slice(data)?;
-
+pub fn verify_internal(options: VerifyParams) -> Result<bool, Error> {
     Ok(verify_encoded(
         &options.hash,
         &options.password.into_bytes(),
+    )?)
+}
+
+pub fn verify_ext_internal(options: VerifyParamsExt) -> Result<bool, Error> {
+    let ad = options.data.unwrap_or(Bytes::default());
+
+    Ok(verify_encoded_ext(
+        &options.verify_params.hash,
+        options.verify_params.password.as_bytes(),
+        &options.secret,
+        &ad[..],
     )?)
 }

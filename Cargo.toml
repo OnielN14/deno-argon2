@@ -8,9 +8,16 @@ edition = "2018"
 path = "native/lib.rs"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+deno = ["deno_core"]
+wasm = ["wasm-bindgen", "serde-wasm-bindgen"]
+
 [dependencies]
 bytes = { version = "1.0.1", features = ["serde"] }
-deno_core = "0.83.0"
-rust-argon2 = "0.8.3"
-serde = { version = "1.0.125", features = ["derive"] }
-serde_json = "1.0.64"
+deno_core = { version = "0.83.0", optional = true }
+rust-argon2 = "1.0.0"
+serde = { version = "1.0.152", features = ["derive"] }
+serde_json = "1.0.91"
+serde-wasm-bindgen = { version = "0.4.5", optional = true }
+wasm-bindgen = { version = "0.2.83", features = ["serde-serialize"], optional = true }
